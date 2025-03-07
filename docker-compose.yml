@@ -1,6 +1,6 @@
 services:
   deep-research:
-    build: .
+    image: deep-research:latest
     env_file:
       - .env.local
     tty: true

@@ -165,6 +165,7 @@ export async function deepResearch({
     serpQueries.map(serpQuery =>
       limit(async () => {
         try {
+          console.log(`Executing search query: ${serpQuery.query}`);
           const result = await firecrawl.search(serpQuery.query, {
             timeout: 15000,
             limit: 5,
@@ -175,6 +176,38 @@ export async function deepResearch({
           const newUrls = compact(result.data.map(item => item.url));
           const newBreadth = Math.ceil(breadth / 2);
           const newDepth = depth - 1;
+
+          // Check if we actually got results
+          if (!result.data || result.data.length === 0) {
+            console.log(`No results found for query: ${serpQuery.query}`);
+            // Create a generic learning since we couldn't get search results
+            const genericLearning = `Unable to retrieve information about "${serpQuery.query}" due to search API limitations. Consider researching this topic directly.`;
+            const allLearnings = [...learnings, genericLearning];
+            
+            if (newDepth > 0) {
+              // Continue research with manually created follow-up questions
+              console.log(`Continuing research despite search failure`);
+              const genericFollowUp = `Learn more about ${serpQuery.query} from alternative sources`;
+              
+              const nextQuery = `
+              Previous research goal: ${serpQuery.researchGoal}
+              Follow-up research directions: \n${genericFollowUp}
+              `.trim();
+              
+              return deepResearch({
+                query: nextQuery,
+                breadth: newBreadth,
+                depth: newDepth,
+                learnings: allLearnings,
+                visitedUrls: [...visitedUrls],
+              });
+            } else {
+              return {
+                learnings: allLearnings,
+                visitedUrls: [...visitedUrls],
+              };
+            }
+          }
 
           const newLearnings = await processSerpResult({
             query: serpQuery.query,
@@ -208,17 +241,40 @@ export async function deepResearch({
             };
           }
         } catch (e: any) {
+          console.error(`Error running query: ${serpQuery.query}`);
           if (e.message && e.message.includes('Timeout')) {
-            console.error(
-              `Timeout error running query: ${serpQuery.query}: `,
-              e,
-            );
+            console.error(`Timeout error: ${e.message}`);
+          } else if (e.message && e.message.includes('trouble')) {
+            console.error(`Firecrawl API error: ${e.message}`);
+            // Add a message about the search API issue
+            const errorLearning = `Unable to retrieve information about "${serpQuery.query}" due to search API limitations. Consider researching this topic directly.`;
+            const allLearnings = [...learnings, errorLearning];
+            
+            if (depth > 1) {
+              // Continue research with manually created follow-up questions
+              console.log(`Continuing research despite API failure`);
+              const genericFollowUp = `Learn more about ${serpQuery.query} from alternative sources`;
+              
+              const nextQuery = `
+              Previous research goal: ${serpQuery.researchGoal || "Research more about " + serpQuery.query}
+              Follow-up research directions: \n${genericFollowUp}
+              `.trim();
+              
+              return deepResearch({
+                query: nextQuery,
+                breadth: Math.max(1, breadth - 1),
+                depth: depth - 1,
+                learnings: allLearnings,
+                visitedUrls,
+              });
+            }
           } else {
-            console.error(`Error running query: ${serpQuery.query}: `, e);
+            console.error(`Unknown error: ${e.message || e}`);
           }
+          
           return {
-            learnings: [],
-            visitedUrls: [],
+            learnings: [...learnings],
+            visitedUrls,
           };
         }
       }),
